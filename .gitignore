@@ -1,0 +1,4 @@
+# cache files and development
+__pycache__/
+venv/
+pr_sample.json
