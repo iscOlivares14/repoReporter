@@ -4,7 +4,8 @@ repoType: Github
 url: https://github.com/pallets/click
 url_pr: https://api.github.com/repos/pallets/click/pulls
 pr_report:
-  state: [open, closed, inprogress] 
+  status: [all]
+  period_days: 7
   mail_to:
   mail_from:
   mail_subject:

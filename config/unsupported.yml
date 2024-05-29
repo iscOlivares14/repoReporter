@@ -1,0 +1,12 @@
+repository_name: something
+enabled: True
+repoType: Bitbucket
+url: https://example.com
+url_pr: https://example.com/pulls
+pr_report:
+  status: [open, closed, merged]
+  period_days: 7
+  mail_to:
+  mail_from:
+  mail_subject:
+  mail_body_template:
