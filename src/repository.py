@@ -1,3 +1,5 @@
+import datetime
+import json
 import logging
 import re
 from urllib.parse import urlparse, parse_qs
@@ -6,7 +8,7 @@ import requests
 from yaml import safe_load
 
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 
 class AbstractRepositoryExtractor:
     """Base repository class."""
@@ -39,8 +41,9 @@ class GithubRepoExtractor(AbstractRepositoryExtractor):
             next_link_item = [l for l in link.split(",") if "next" in l]
             # <https://api.github.com/repositories/19103692/pulls?state=closed&direction=desc&per_page=1&page=2>; rel="next"
             if next_link_item:
+                logging.debug(next_link_item)
                 re_url_item = re.compile('^<.*>')
-                results = re_url_item.search(next_link_item[0])
+                results = re_url_item.search(next_link_item[0].strip())
                 url_str = results.group()
                 url_str = url_str.replace('<', '').replace('>', '')
                 url_obj = urlparse(url_str)
@@ -52,37 +55,107 @@ class GithubRepoExtractor(AbstractRepositoryExtractor):
         return next_page
 
     def _get_pr_url(self):
+        """"url to get repository PRs"""
         return self._config['url_pr']
     
     def _get_payload(self, next_page=None):
+        """default 10 PRs per page"""
         payload = {
             "state": "all",
             "direction": "desc",
-            "per_page": 1
+            "per_page": 15
         }
         if next_page:
             payload.update({'page': next_page})
 
         return payload
     
-    def _pr_in_time():
-        pass
+    # TODO: MOve all this to a PR Class for better semanthic
+    def _is_pr_time_valid(self, str_pr_time, valid_time):
+        """Check time from PR is valid, depends on the case 
+        it could be created_at, closed_at, merged_at"""
+        pr_time = datetime.datetime.strptime(str_pr_time, '%Y-%m-%dT%H:%M:%SZ')
+        logging.debug(f"{pr_time} >= {valid_time} = {pr_time >= valid_time}")
+        return pr_time >= valid_time
 
-    def _pr_is_closed(self, pr):
-        return pr['state'] == 'closed'
+    def _is_pr_open(self, pr, valid_time):
+        """
+        pr_open - Applies when:
+        - "state": "open" <==
+        - "created_at": "2024-05-21T20:49:52Z", (Valid time) <==
+        - "updated_at": "2024-05-23T22:19:45Z",
+        - "closed_at": null
+        - "merged_at": null
+        """
+        logging.debug("is Open??")
+        is_open = False
+        if pr['state'] == 'open':
+            if self._is_pr_time_valid(pr['created_at'], valid_time):
+                is_open = True
+        return is_open
+    
+    def _is_pr_merged(self, pr, valid_time):
+        """
+        pr_merged - Applies when:
+        - "state": "closed" <==
+        - "created_at": "2024-05-20T23:23:43Z",
+        - "updated_at": "2024-05-22T21:14:03Z",
+        - "closed_at": "2024-05-21T14:46:21Z",
+        - "merged_at": "2024-05-21T14:46:21Z", <==
+        """
+        logging.debug("is Merged??")
+        is_merged = False
+        if pr['state'] == 'closed':
+            if pr['merged_at'] and \
+                self._is_pr_time_valid(pr['merged_at'], valid_time):
+                is_merged = True
+        return is_merged
 
-    def classify_prs(self, prs_list):
-        """Classify PRs in open, closed or merged and return a tuple of 3 lists"""
+    def _is_pr_closed(self, pr, valid_time):
+        """
+        pr_closed - Applies when:
+        - "state": "closed" <==
+        - "created_at": "2024-05-20T23:23:43Z",
+        - "updated_at": "2024-05-22T21:14:03Z",
+        - "closed_at": "2024-05-21T14:46:21Z", <==
+        - "merged_at": null, <==
+        """
+
+        is_closed = False
+        if pr['state'] == 'closed':
+            if pr['closed_at'] and \
+                not pr['merged_at'] and \
+                self._is_pr_time_valid(pr['closed_at'], valid_time):
+                is_closed = True
+        logging.debug(f"is Closed?? {is_closed}")
+        return is_closed
+
+    def _get_minimum_valid_datetime(self, period_days):
+        """Get the datetime which works as low limit for PRs to report."""
+        today = datetime.datetime.today()
+        return today - datetime.timedelta(days=period_days)
+
+    def classify_prs(self, prs_list, valid_datetime):
+        """
+        Classify PRs in open, closed or merged and return a tuple of 3 lists
+
+        out_of_period - Flagged when the first out of time window PR appears
+        """
         pr_open = []
         pr_closed = []
         pr_merged = []
         out_of_period = False
 
         for pr in prs_list:
-            # validate time
-            # validate open
-            # validate closed
-            if self._pr_is_closed(pr):
+            logging.debug(f"Saving data for PR id: {pr['id']}")
+            with open(f"tmp/{pr['id']}.json", mode="w") as file:
+                file.write(json.dumps(pr))
+
+            if self._is_pr_open(pr, valid_datetime):
+                pr_open.append(pr)
+            elif self._is_pr_merged(pr, valid_datetime):
+                pr_merged.append(pr)
+            elif self._is_pr_closed(pr, valid_datetime):
                 pr_closed.append(pr)
 
         return (out_of_period, pr_open, pr_closed, pr_merged)
@@ -98,6 +171,8 @@ class GithubRepoExtractor(AbstractRepositoryExtractor):
         }
 
         # as the PRs are sorted will stop once it's out of timeframe
+        valid_datetime = self._get_minimum_valid_datetime(period_days)
+        logging.info(f"Valid datetime {valid_datetime}")
         out_of_period = False
         next_page = None
 
@@ -106,30 +181,46 @@ class GithubRepoExtractor(AbstractRepositoryExtractor):
 
         while not out_of_period:
             payload = self._get_payload(next_page)
-            print(f"Making API call {payload}")
             r = requests.get(self._get_pr_url(), params=payload)
             if not r:
                 break # empty response
             # validate PRs are in range and add to final list
-            out_of_period, pr_open, pr_closed, pr_merged = self.classify_prs(r.json())
-            print(f'# Cycle - open: {len(pr_open)} / closed: {len(pr_closed)} / merged: {len(pr_merged)}')
+            out_of_period, pr_open, pr_closed, pr_merged = self.classify_prs(r.json(), valid_datetime)
+            logging.info(f'# Cycle - O: {len(pr_open)} / C: {len(pr_closed)} / M: {len(pr_merged)}')
+            # no valid entries in the last cycle, stop
+            if not pr_open and not pr_merged and not pr_closed:
+                logging.info("Stop extraction as no new valid events appeared")
+                break
             # add to final results
-            prs_to_report['open'].append(pr_open)
-            prs_to_report['closed'].append(pr_closed)
-            prs_to_report['merged'].append(pr_merged)
+            prs_to_report['open'].extend(pr_open)
+            prs_to_report['closed'].extend(pr_closed)
+            prs_to_report['merged'].extend(pr_merged)
+
+            logging.debug(
+                f"Total <O: {len(prs_to_report['open'])}>"
+                f" <C: {len(prs_to_report['closed'])}>"
+                f" <M: {len(prs_to_report['merged'])}>"
+            )
             # looks for next link to call, must be different
             if next_page != self._get_next_page(r.headers):
                 next_page = self._get_next_page(r.headers)
             else:
                 next_page = None
-            print(f'Next page? {next_page}')
+            logging.debug(f'Next page? {next_page}')
+            # print(prs_to_report)
             # no next page break the cycle
             if not next_page:
                 break
             if counter >= 5:
                 break
             counter += 1
-        
+
+        logging.info(
+            f"Total <Open: {len(prs_to_report['open'])}>"
+            f" <Closed: {len(prs_to_report['closed'])}>"
+            f" <Merged: {len(prs_to_report['merged'])}>"
+        )
+
         return prs_to_report
 
     def __str__(self) -> str:
