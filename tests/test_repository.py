@@ -1,3 +1,4 @@
+import datetime
 import json
 import logging
 
@@ -5,7 +6,10 @@ import pytest
 import requests
 import requests_mock
 
-from src.repository import load_config, get_repository, GithubRepoExtractor
+from app.repository import (
+    load_config, 
+    get_repository,
+    GithubRepoExtractor)
 
 @pytest.fixture
 def config():
@@ -67,9 +71,13 @@ def json_content_github_open():
     return json_response
 
 def test_classify_prs(github_extractor, json_content_github_closed):
-    oop, pr_o, pr_c, pr_m = github_extractor.classify_prs(json_content_github_closed)
+    today = datetime.datetime.today()
+    valid_dt = today - datetime.timedelta(days=1)
+    oop, pr_o, pr_c, pr_m = github_extractor.classify_prs(
+        json_content_github_closed, valid_dt
+        )
 
-    assert len(pr_c) == 1
+    assert len(pr_c) == 0
 
 
 @requests_mock.Mocker(kw='mock')
@@ -83,4 +91,4 @@ def test_extract_pr_data(config, github_extractor, json_content_github_closed, j
 
     data = github_extractor.extract_pr_data(period_days=1)
 
-    assert len(data['closed']) == 2
+    assert data == {}

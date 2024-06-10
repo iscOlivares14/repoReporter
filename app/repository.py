@@ -7,8 +7,7 @@ from urllib.parse import urlparse, parse_qs
 import requests
 from yaml import safe_load
 
-
-logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 class AbstractRepositoryExtractor:
     """Base repository class."""
@@ -41,7 +40,7 @@ class GithubRepoExtractor(AbstractRepositoryExtractor):
             next_link_item = [l for l in link.split(",") if "next" in l]
             # <https://api.github.com/repositories/19103692/pulls?state=closed&direction=desc&per_page=1&page=2>; rel="next"
             if next_link_item:
-                logging.debug(next_link_item)
+                logger.debug(next_link_item)
                 re_url_item = re.compile('^<.*>')
                 results = re_url_item.search(next_link_item[0].strip())
                 url_str = results.group()
@@ -75,7 +74,7 @@ class GithubRepoExtractor(AbstractRepositoryExtractor):
         """Check time from PR is valid, depends on the case 
         it could be created_at, closed_at, merged_at"""
         pr_time = datetime.datetime.strptime(str_pr_time, '%Y-%m-%dT%H:%M:%SZ')
-        logging.debug(f"{pr_time} >= {valid_time} = {pr_time >= valid_time}")
+        logger.debug(f"{pr_time} >= {valid_time} = {pr_time >= valid_time}")
         return pr_time >= valid_time
 
     def _is_pr_open(self, pr, valid_time):
@@ -87,7 +86,7 @@ class GithubRepoExtractor(AbstractRepositoryExtractor):
         - "closed_at": null
         - "merged_at": null
         """
-        logging.debug("is Open??")
+        logger.debug("is Open??")
         is_open = False
         if pr['state'] == 'open':
             if self._is_pr_time_valid(pr['created_at'], valid_time):
@@ -103,7 +102,7 @@ class GithubRepoExtractor(AbstractRepositoryExtractor):
         - "closed_at": "2024-05-21T14:46:21Z",
         - "merged_at": "2024-05-21T14:46:21Z", <==
         """
-        logging.debug("is Merged??")
+        logger.debug("is Merged??")
         is_merged = False
         if pr['state'] == 'closed':
             if pr['merged_at'] and \
@@ -127,13 +126,16 @@ class GithubRepoExtractor(AbstractRepositoryExtractor):
                 not pr['merged_at'] and \
                 self._is_pr_time_valid(pr['closed_at'], valid_time):
                 is_closed = True
-        logging.debug(f"is Closed?? {is_closed}")
+        logger.debug(f"is Closed?? {is_closed}")
         return is_closed
 
     def _get_minimum_valid_datetime(self, period_days):
         """Get the datetime which works as low limit for PRs to report."""
         today = datetime.datetime.today()
         return today - datetime.timedelta(days=period_days)
+    
+    def get_config(self):
+        return self._config
 
     def classify_prs(self, prs_list, valid_datetime):
         """
@@ -147,7 +149,7 @@ class GithubRepoExtractor(AbstractRepositoryExtractor):
         out_of_period = False
 
         for pr in prs_list:
-            logging.debug(f"Saving data for PR id: {pr['id']}")
+            logger.debug(f"Saving data for PR id: {pr['id']}")
             with open(f"tmp/{pr['id']}.json", mode="w") as file:
                 file.write(json.dumps(pr))
 
@@ -172,7 +174,7 @@ class GithubRepoExtractor(AbstractRepositoryExtractor):
 
         # as the PRs are sorted will stop once it's out of timeframe
         valid_datetime = self._get_minimum_valid_datetime(period_days)
-        logging.info(f"Valid datetime {valid_datetime}")
+        logger.info(f"Valid datetime {valid_datetime}")
         out_of_period = False
         next_page = None
 
@@ -186,27 +188,22 @@ class GithubRepoExtractor(AbstractRepositoryExtractor):
                 break # empty response
             # validate PRs are in range and add to final list
             out_of_period, pr_open, pr_closed, pr_merged = self.classify_prs(r.json(), valid_datetime)
-            logging.info(f'# Cycle - O: {len(pr_open)} / C: {len(pr_closed)} / M: {len(pr_merged)}')
+            logger.info(f'# Cycle - O: {len(pr_open)} / C: {len(pr_closed)} / M: {len(pr_merged)}')
             # no valid entries in the last cycle, stop
             if not pr_open and not pr_merged and not pr_closed:
-                logging.info("Stop extraction as no new valid events appeared")
+                logger.info("Stop extraction as no new valid events appeared")
                 break
             # add to final results
             prs_to_report['open'].extend(pr_open)
             prs_to_report['closed'].extend(pr_closed)
             prs_to_report['merged'].extend(pr_merged)
-
-            logging.debug(
-                f"Total <O: {len(prs_to_report['open'])}>"
-                f" <C: {len(prs_to_report['closed'])}>"
-                f" <M: {len(prs_to_report['merged'])}>"
-            )
+            
             # looks for next link to call, must be different
             if next_page != self._get_next_page(r.headers):
                 next_page = self._get_next_page(r.headers)
             else:
                 next_page = None
-            logging.debug(f'Next page? {next_page}')
+            logger.debug(f'Next page? {next_page}')
             # print(prs_to_report)
             # no next page break the cycle
             if not next_page:
@@ -215,12 +212,20 @@ class GithubRepoExtractor(AbstractRepositoryExtractor):
                 break
             counter += 1
 
-        logging.info(
-            f"Total <Open: {len(prs_to_report['open'])}>"
-            f" <Closed: {len(prs_to_report['closed'])}>"
-            f" <Merged: {len(prs_to_report['merged'])}>"
+        total_open = len(prs_to_report['open'])
+        total_merged = len(prs_to_report['merged'])
+        total_closed = len(prs_to_report['closed'])
+        prs_to_report['qty_open'] = total_open
+        prs_to_report['qty_closed'] = total_closed
+        prs_to_report['qty_merged'] = total_merged
+        prs_to_report['total_prs'] = total_open + total_closed + total_merged
+        prs_to_report['days_to_report'] = period_days
+        logger.info(
+            f"Total <Open: {total_open}>"
+            f" <Closed: {total_closed}>"
+            f" <Merged: {total_merged}>"
         )
-
+        
         return prs_to_report
 
     def __str__(self) -> str:
