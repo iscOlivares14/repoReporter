@@ -1,0 +1,11 @@
+repository_name: pytest
+enabled: True
+repoType: Github
+url: https://github.com/pytest-dev/pytest
+url_pr: https://api.github.com/repos/pytest-dev/pytest/pulls
+pr_report:
+  status: [all]
+  mail_to: pr_reports@company.com
+  mail_from: reporter@company.com
+  mail_subject: Pull Requests from last {days} days.
+  mail_body_template: template/pr_report.html
