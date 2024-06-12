@@ -1,6 +1,7 @@
 import datetime
 import logging
 
+import fire
 from jinja2 import Template
 
 from repository import load_config, get_repository
@@ -49,6 +50,7 @@ def sent_mail_report(repo, days_to_report, pr_data):
                             f"-{datetime.datetime.now()}.html")
         with open(email_local_file, mode="w") as file:
             file.write(email_content)
+            logger.info(f"Templated genetared: {email_local_file}")
         # TODO implememt smtp for real sending
     else:
         logger.warning("Mail configuration not found or incomplete.")
@@ -58,7 +60,7 @@ def sent_mail_report(repo, days_to_report, pr_data):
 def analize_repository_data(period_days=7, config_file_path='config/config.yml'):
     """
     Sends a mail report using the parameters from config.yml
-    by default takes lastest 7 days, default config file 
+    by default takes lastest 7 days, default config file is 'config/config.yml'
     """
     repo = get_repository(load_config(config_file_path))
 
@@ -68,4 +70,5 @@ def analize_repository_data(period_days=7, config_file_path='config/config.yml')
 
 
 if __name__ == "__main__":
-    analize_repository_data(period_days=7)
+    fire.Fire(analize_repository_data)
+    #analize_repository_data(period_days=7)
