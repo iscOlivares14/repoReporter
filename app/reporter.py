@@ -45,7 +45,7 @@ def sent_mail_report(repo, days_to_report, pr_data):
         email_content = jinja_template.render(pr_data)
         #logger.info(email_content)
         # save to a file to local visualization
-        email_local_file = (f"tmp/{repo_cfg['repository_name']}"
+        email_local_file = (f"/tmp/{repo_cfg['repository_name']}"
                             f"-{repo_cfg['repoType']}"
                             f"-{datetime.datetime.now()}.html")
         with open(email_local_file, mode="w") as file:
@@ -71,4 +71,7 @@ def analize_repository_data(period_days=7, config_file_path='config/config.yml')
 
 if __name__ == "__main__":
     fire.Fire(analize_repository_data)
+
+    # python3 app/reporter.py --period-days=7 --config_file_path='config/config_pytest.yml'
+
     #analize_repository_data(period_days=7)
