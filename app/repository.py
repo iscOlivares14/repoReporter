@@ -149,9 +149,10 @@ class GithubRepoExtractor(AbstractRepositoryExtractor):
         out_of_period = False
 
         for pr in prs_list:
-            logger.debug(f"Saving data for PR id: {pr['id']}")
-            with open(f"tmp/{pr['id']}.json", mode="w") as file:
-                file.write(json.dumps(pr))
+            # TODO: Make optional/configurable to save PR data
+            # logger.debug(f"Saving data for PR id: {pr['id']}")
+            # with open(f"tmp/{pr['id']}.json", mode="w") as file:
+            #     file.write(json.dumps(pr))
 
             if self._is_pr_open(pr, valid_datetime):
                 pr_open.append(pr)
